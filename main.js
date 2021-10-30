@@ -40,7 +40,7 @@ const main = async () => {
       return
     }
 
-    const handle = async (stream) => {
+    const handle = async stream => {
       try {
         const fullPath = `${dir}${path}`
         await fsp.access(fullPath, fs.constants.F_OK | fs.constants.R_OK)
@@ -69,7 +69,13 @@ const main = async () => {
 
     handle(stream)
   })
-  server.on('error', console.error)
+  server.on('error', error => {
+    if (error.code === 'ECONNRESET') {  // Ocassional econnreset
+      server.listen(port)
+      return
+    }
+    console.error(error)
+  })
 
   server.listen(port)
 }
