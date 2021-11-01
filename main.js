@@ -4,6 +4,8 @@ const fsp = require('fs/promises')
 const fs = require('fs')
 const http2 = require('http2')
 const mime = require('mime-types')
+const zlib = require('zlib')
+const { pipeline } = require('stream/promises')
 
 const { HTTP2_HEADER_PATH, HTTP2_HEADER_STATUS } = http2.constants
 
@@ -41,6 +43,9 @@ const main = async () => {
     }
 
     const handle = async stream => {
+      let mimeType
+      let readStream
+      const gzip = zlib.createGzip({ level: 9 })
       try {
         const fullPath = `${dir}${path}`
         await fsp.access(fullPath, fs.constants.F_OK | fs.constants.R_OK)
@@ -48,23 +53,27 @@ const main = async () => {
           throw new Error('Forbidden to access a directory.')
         }
 
-        const mimeType = mime.lookup(fullPath)
+        mimeType = mime.lookup(fullPath)
         if (!mimeType) {
           throw new Error()
         }
-        stream.respond({ [HTTP2_HEADER_STATUS]: 200, 'Content-Type': mimeType })
 
-        const readStream = fs.createReadStream(fullPath)
-        readStream.pipe(stream)
+        readStream = fs.createReadStream(fullPath)
       } catch (error) {
-        const mimeType = mime.lookup(indexFilePath)
+        mimeType = mime.lookup(indexFilePath)
         if (!mimeType) {
           throw new Error('index.html does not exist.')
         }
-        stream.respond({ [HTTP2_HEADER_STATUS]: 200, 'Content-Type': mimeType })
-        const readStream = fs.createReadStream(indexFilePath)
-        readStream.pipe(stream)
+
+        readStream = fs.createReadStream(indexFilePath)
       }
+
+      stream.respond({
+        [HTTP2_HEADER_STATUS]: 200,
+        'Content-Type': mimeType,
+        'Content-Encoding': 'gzip',
+      })
+      pipeline(readStream, gzip, stream)
     }
 
     handle(stream)
@@ -72,6 +81,7 @@ const main = async () => {
   server.on('error', error => {
     if (error.code === 'ECONNRESET') {  // Ocassional econnreset
       server.listen(port)
+      console.error('Occasional ECONNRESET!', error)
       return
     }
     console.error(error)
